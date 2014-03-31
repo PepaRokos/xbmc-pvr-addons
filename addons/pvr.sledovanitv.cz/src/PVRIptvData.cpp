@@ -1,6 +1,6 @@
 /*
- *      Copyright (C) 2013 Anton Fedchin
- *      http://github.com/afedchin/xbmc-addon-iptvsimple/
+ *      Copyright (C) 2014 Josef Rokos
+ *      http://github.com/PepaRokos/xbmc-pvr-addons/
  *
  *      Copyright (C) 2011 Pulse-Eight
  *      http://www.pulse-eight.com/
@@ -28,60 +28,19 @@
 #include <map>
 #include <json/json.h>
 
-//#include "zlib.h"
-//#include "rapidxml/rapidxml.hpp"
 #include "PVRIptvData.h"
 #include "apimanager.h"
-
-//#define M3U_START_MARKER        "#EXTM3U"
-//#define M3U_INFO_MARKER         "#EXTINF"
-//#define TVG_INFO_ID_MARKER      "tvg-id="
-//#define TVG_INFO_NAME_MARKER    "tvg-name="
-//#define TVG_INFO_LOGO_MARKER    "tvg-logo="
-//#define TVG_INFO_SHIFT_MARKER   "tvg-shift="
-//#define GROUP_NAME_MARKER       "group-title="
-//#define RADIO_MARKER            "radio="
-//#define CHANNEL_LOGO_EXTENSION  ".png"
-//#define SECONDS_IN_DAY          86400
 
 using namespace std;
 using namespace ADDON;
 
-//template<class Ch>
-//inline bool GetNodeValue(const xml_node<Ch> * pRootNode, const char* strTag, CStdString& strStringValue)
-//{
-//  xml_node<Ch> *pChildNode = pRootNode->first_node(strTag);
-//  if (pChildNode == NULL)
-//  {
-//    return false;
-//  }
-//  strStringValue = pChildNode->value();
-//  return true;
-//}
-
-//template<class Ch>
-//inline bool GetAttributeValue(const xml_node<Ch> * pNode, const char* strAttributeName, CStdString& strStringValue)
-//{
-//  xml_attribute<Ch> *pAttribute = pNode->first_attribute(strAttributeName);
-//  if (pAttribute == NULL)
-//  {
-//    return false;
-//  }
-//  strStringValue = pAttribute->value();
-//  return true;
-//}
-
 PVRIptvData::PVRIptvData(void)
 {
-  m_strXMLTVUrl   = g_strTvgPath;
-  m_strM3uUrl     = g_strM3UPath;
-  m_strLogoPath   = g_strLogoPath;
-  m_iEPGTimeShift = g_iEPGTimeShift;
-  m_bTSOverride   = g_bTSOverride;
   m_iLastStart    = 0;
   m_iLastEnd      = 0;
 
   m_bEGPLoaded = false;
+  m_bIsPlaying = false;
 
   m_manager.login();
 
@@ -90,8 +49,8 @@ PVRIptvData::PVRIptvData(void)
     XBMC->QueueNotification(QUEUE_INFO, "%d channels loaded.", m_channels.size());
   }
 
-  m_bUpdating = true;
-  CreateThread();
+  m_bUpdating = false;
+  //CreateThread();
 
 }
 
@@ -104,9 +63,9 @@ void *PVRIptvData::Process(void)
     if (counter >= 300000)
     {
       counter = 0;
-      PVR->TriggerTimerUpdate();
-      Sleep(5000);
       PVR->TriggerRecordingUpdate();
+      Sleep(2000);
+      PVR->TriggerTimerUpdate();
     }
     counter += 1000;
     Sleep(1000);
@@ -183,6 +142,8 @@ bool PVRIptvData::LoadEPG(time_t iStart, time_t iEnd)
         iptventry.strPlot = epgEntry.get("description", "").asString();
         iptventry.startTime = ParseDateTime(epgEntry.get("startTime", "").asString());
         iptventry.endTime = ParseDateTime(epgEntry.get("endTime", "").asString());
+
+        XBMC->Log(LOG_DEBUG, "Loading TV show: %s - %s", strChId.c_str(), iptventry.strTitle.c_str());
 
         epgChannel.epg.push_back(iptventry);
       }
@@ -474,22 +435,17 @@ PVR_ERROR PVRIptvData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &
       return PVR_ERROR_NO_ERROR;
     }
 
-    int iShift = m_bTSOverride ? m_iEPGTimeShift : myChannel->iTvgShift + m_iEPGTimeShift;
-
     vector<PVRIptvEpgEntry>::iterator myTag;
     for (myTag = epg->epg.begin(); myTag < epg->epg.end(); myTag++)
     {
-      if ((myTag->endTime + iShift) < iStart) 
-        continue;
-
       EPG_TAG tag;
       memset(&tag, 0, sizeof(EPG_TAG));
 
       tag.iUniqueBroadcastId  = myTag->iBroadcastId;
       tag.strTitle            = myTag->strTitle.c_str();
       tag.iChannelNumber      = myTag->iChannelId;
-      tag.startTime           = myTag->startTime + iShift;
-      tag.endTime             = myTag->endTime + iShift;
+      tag.startTime           = myTag->startTime;
+      tag.endTime             = myTag->endTime;
       tag.strPlotOutline      = myTag->strPlotOutline.c_str();
       tag.strPlot             = myTag->strPlot.c_str();
       tag.strIconPath         = myTag->strIconPath.c_str();
@@ -498,9 +454,6 @@ PVR_ERROR PVRIptvData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &
       tag.strGenreDescription = myTag->strGenreString.c_str();
 
       PVR->TransferEpgEntry(handle, &tag);
-
-      if ((myTag->startTime + iShift) > iEnd)
-        break;
     }
 
     return PVR_ERROR_NO_ERROR;
@@ -569,6 +522,20 @@ PVRIptvChannel * PVRIptvData::FindChannel(const std::string &strId, const std::s
   return NULL;
 }
 
+PVRIptvChannel *PVRIptvData::FindChannel(int iChannelUid)
+{
+  vector<PVRIptvChannel>::iterator it;
+  for (it = m_channels.begin(); it != m_channels.end(); it++)
+  {
+    if (it->iUniqueId == iChannelUid)
+    {
+      return &*it;
+    }
+  }
+
+  return NULL;
+}
+
 PVRIptvChannelGroup * PVRIptvData::FindGroup(const std::string &strName)
 {
   vector<PVRIptvChannelGroup>::iterator it;
@@ -595,6 +562,34 @@ PVRIptvEpgChannel * PVRIptvData::FindEpg(const std::string &strId)
   }
 
   return NULL;
+}
+
+string PVRIptvData::FindTvShowId(const PVRIptvChannel &channel, time_t iStart, time_t iEnd)
+{
+  std::string resp = m_manager.getEventId(channel.strTvgId, iStart, iEnd);
+
+  Json::Reader reader;
+  Json::Value root;
+
+  if (!reader.parse(resp, root))
+  {
+    XBMC->Log(LOG_NOTICE, "Cannot parse EPG.");
+    return "";
+  }
+
+  if (root.get("status", 0).asInt() == 0)
+  {
+    XBMC->Log(LOG_DEBUG, "Returned: %s", resp.c_str());
+    return "";
+  }
+
+  Json::Value::Members ch = root["channels"].getMemberNames();
+  std::string strChannelId = ch[0];
+
+  int i = 0;
+  Json::Value event = root["channels"][strChannelId][i];
+
+  return event.get("eventId", "").asString();
 }
 
 PVRIptvEpgChannel * PVRIptvData::FindEpgForChannel(PVRIptvChannel &channel)
@@ -747,4 +742,59 @@ PVR_ERROR PVRIptvData::GetTimers(ADDON_HANDLE handle)
 
     PVR->TransferTimerEntry(handle, &xbmcTimer);
   }
+
+  return PVR_ERROR_NO_ERROR;
+}
+
+PVR_ERROR PVRIptvData::AddTimer(const PVR_TIMER &timer)
+{
+  PVRIptvChannel *channel = FindChannel(timer.iClientChannelUid);
+  if (channel == NULL)
+  {
+    XBMC->Log(LOG_DEBUG, "channel not found");
+    return PVR_ERROR_SERVER_ERROR;
+  }
+
+  string strEventId = FindTvShowId(*channel, timer.startTime, timer.endTime);
+  if (strEventId.empty())
+  {
+    XBMC->Log(LOG_DEBUG, "event not found");
+    return PVR_ERROR_SERVER_ERROR;
+  }
+
+  bool sucess = m_manager.addTimer(strEventId);
+  if (sucess)
+  {
+    PVR->TriggerRecordingUpdate();
+    PVR->TriggerTimerUpdate();
+  }
+
+  return sucess ? PVR_ERROR_NO_ERROR : PVR_ERROR_SERVER_ERROR;
+}
+
+PVR_ERROR PVRIptvData::DeleteRecord(const string &strRecordId)
+{
+  bool sucess = m_manager.deleteRecord(strRecordId);
+  if (sucess)
+  {
+    PVR->TriggerRecordingUpdate();
+    PVR->TriggerTimerUpdate();
+  }
+
+  return sucess ? PVR_ERROR_NO_ERROR : PVR_ERROR_SERVER_ERROR;
+}
+
+PVR_ERROR PVRIptvData::DeleteRecord(int iRecordId)
+{
+  char buff[128];
+  std::string strId;
+  sprintf(buff, "%d", iRecordId);
+  strId = buff;
+
+  return DeleteRecord(strId);
+}
+
+void PVRIptvData::SetPlaying(bool playing)
+{
+  m_bIsPlaying = playing;
 }

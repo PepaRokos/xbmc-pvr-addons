@@ -1,7 +1,7 @@
 #pragma once
 /*
- *      Copyright (C) 2013 Anton Fedchin
- *      http://github.com/afedchin/xbmc-addon-iptvsimple/
+ *      Copyright (C) 2014 Josef Rokos
+ *      http://github.com/PepaRokos/xbmc-pvr-addons/
  *
  *      Copyright (C) 2011 Pulse-Eight
  *      http://www.pulse-eight.com/
@@ -124,6 +124,10 @@ public:
   virtual PVR_ERROR GetRecordings(ADDON_HANDLE handle);
   virtual int       GetTimersAmount();
   virtual PVR_ERROR GetTimers(ADDON_HANDLE handle);
+  virtual PVR_ERROR AddTimer(const PVR_TIMER &timer);
+  virtual PVR_ERROR DeleteRecord(const std::string &strRecordId);
+  virtual PVR_ERROR DeleteRecord(int iRecordId);
+  virtual void      SetPlaying(bool playing);
 
 protected:
   virtual bool                 LoadPlayList(void);
@@ -131,8 +135,10 @@ protected:
   virtual bool                 LoadRecordings();
   virtual int                  GetFileContents(CStdString& url, std::string &strContent);
   virtual PVRIptvChannel      *FindChannel(const std::string &strId, const std::string &strName);
+  virtual PVRIptvChannel      *FindChannel(int iChannelUid);
   virtual PVRIptvChannelGroup *FindGroup(const std::string &strName);
   virtual PVRIptvEpgChannel   *FindEpg(const std::string &strId);
+  virtual std::string          FindTvShowId(const PVRIptvChannel &channel, time_t iStart, time_t iEnd);
   virtual PVRIptvEpgChannel   *FindEpgForChannel(PVRIptvChannel &channel);
   virtual int                  ParseDateTime(std::string strDate);
   virtual int                  GetCachedFileContents(const std::string &strCachedName, const std::string &strFilePath, 
@@ -143,15 +149,11 @@ protected:
   virtual void *Process(void);
 
 private:
-  bool                              m_bTSOverride;
   bool                              m_bEGPLoaded;
   bool                              m_bUpdating;
-  int                               m_iEPGTimeShift;
+  bool                              m_bIsPlaying;
   int                               m_iLastStart;
   int                               m_iLastEnd;
-  CStdString                        m_strXMLTVUrl;
-  CStdString                        m_strM3uUrl;
-  CStdString                        m_strLogoPath;
   std::vector<PVRIptvChannelGroup>  m_groups;
   std::vector<PVRIptvChannel>       m_channels;
   std::vector<PVRIptvEpgChannel>    m_epg;
